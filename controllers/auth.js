@@ -1,5 +1,7 @@
 const User = require("../models/user");
 const ErrorResponse = require("../utils/errorResponse");
+const sendEmail = require("../utils/sendEmail");
+const crypto = require("crypto");
 
 const register = async (req, res, next) => {
   const { username, email, password } = req.body;
@@ -64,16 +66,53 @@ const forgotpassword = async (req, res, next) => {
       <a href=${resetUrl} clicktracking=off>${resetUrl}</a>
     `;
     try {
-      
-    } catch (error) {
-      
-    }
+      await sendEmail({
+        to: user.email,
+        subject: "Password Reset Request",
+        text: message,
+      });
 
-  } catch (error) {}
+      res.status(200).json({ success: true, data: "Email was sent!" });
+    } catch (error) {
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpire = undefined;
+
+      await user.save();
+
+      return next(new ErrorResponse("Email could not be send", 500));
+    }
+  } catch (error) {
+    next(error);
+  }
 };
 
-const resetpassword = (req, res, next) => {
-  res.send("resetpassword");
+const resetpassword = async (req, res, next) => {
+  const resetPasswordToken = crypto
+    .createHash("sha256")
+    .update(req.params.resetToken)
+    .digest("hex");
+
+  try {
+    const user = await User.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() },
+    });
+    if (!user) {
+      return next(new ErrorResponse("Invalid Reset Token", 400));
+    }
+    user.password = req.body.password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+
+    await user.save();
+
+    res.status(201).json({
+      success: true,
+      data: "Password Rest Success",
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
 const setToken = (user, statusCode, res) => {
